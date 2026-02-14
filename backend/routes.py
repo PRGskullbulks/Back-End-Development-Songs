@@ -2,7 +2,7 @@ from . import app
 import os
 import json
 import pymongo
-from flask import jsonify, request, make_response, abort, url_for  # noqa; F401
+from flask import Flask, jsonify, request, make_response, abort, url_for  # noqa; F401
 from pymongo import MongoClient
 from bson import json_util
 from pymongo.errors import OperationFailure
@@ -16,10 +16,16 @@ songs_list: list = json.load(open(json_url))
 
 # client = MongoClient(
 #     f"mongodb://{app.config['MONGO_USERNAME']}:{app.config['MONGO_PASSWORD']}@localhost")
-mongodb_service = os.environ.get('MONGODB_SERVICE')
-mongodb_username = os.environ.get('MONGODB_USERNAME')
-mongodb_password = os.environ.get('MONGODB_PASSWORD')
-mongodb_port = os.environ.get('MONGODB_PORT')
+# mongodb_service = os.environ.get('MONGODB_SERVICE')
+# mongodb_username = os.environ.get('MONGODB_USERNAME')
+# mongodb_password = os.environ.get('MONGODB_PASSWORD')
+# mongodb_port = os.environ.get('MONGODB_PORT')
+
+mongodb_service = "192.168.50.50"
+mongodb_username = "admin"
+mongodb_password = "password"
+mongodb_port = "27017"
+
 
 print(f'The value of MONGODB_SERVICE is: {mongodb_service}')
 
@@ -48,6 +54,84 @@ db.songs.insert_many(songs_list)
 def parse_json(data):
     return json.loads(json_util.dumps(data))
 
-######################################################################
-# INSERT CODE HERE
-######################################################################
+@app.route("/health", methods=["GET"])
+def health():
+    return jsonify({'status': 'ok'})
+
+@app.route("/count", methods=["GET"])
+def count():
+    """return length of data"""
+    count = db.songs.count_documents({})
+    return {"count": count}, 200
+
+
+@app.route("/songs", methods=["GET"])
+def get_songs():
+    """return all songs"""
+    songs = db.songs.find()
+    return jsonify({"songs" : parse_json(songs)}), 200
+
+@app.route("/song/<id>", methods=["GET"])
+def get_song_by_id(id):
+    """return song by id"""
+    song = db.songs.find_one({"id": int(id)})
+    if song:
+        return jsonify({"song": parse_json(song)}), 200
+    else:
+        return jsonify({"error": f"Song with id {id} not found"}), 404    
+
+@app.route("/song", methods=["POST"])
+def create_song():
+    """create a new song"""
+    data = request.get_json()
+
+    if not data:
+        return jsonify({"error": "No input data provided"}), 400
+
+    existing_song = db.songs.find_one({"id": data["id"]})
+    if existing_song:
+        return jsonify({
+            "Message": f"song with id {data['id']} already present"
+        }), 302
+
+    result: InsertOneResult = db.songs.insert_one(data)
+
+    return jsonify({
+        "message": "Song created",
+        "id": str(result.inserted_id)
+    }), 201
+    
+@app.route("/song/<int:id>", methods=["PUT"])
+def update_song(id):
+    """update a song by id"""
+    data = request.get_json()
+
+    if not data:
+        return jsonify({"error": "No input data provided"}), 400
+
+    song = db.songs.find_one({"id": id})
+
+    if not song:
+        return jsonify({"error": f"Song with id {id} not found"}), 404
+
+    result = db.songs.update_one({"id": id}, {"$set": data})
+
+    if result.modified_count == 0:
+        return jsonify({"message": "song found but nothing updated"}), 200
+
+    return jsonify({"message": "Song created"}), 201
+
+@app.route("/song/<int:id>", methods=["DELETE"])
+def delete_song(id):
+    """delete a song by id"""
+    song = db.songs.find_one({"id": id})
+
+    if not song:
+        return jsonify({"error": f"Song not found"}), 404
+
+    result = db.songs.delete_one({"id": id})
+
+    if result.deleted_count == 0:
+        return jsonify({"message": "song found but nothing deleted"}), 200
+
+    return jsonify({}), 204
